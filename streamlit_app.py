@@ -36,6 +36,18 @@ st.set_page_config(
 # Environment setup for deployment
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 os.environ.setdefault('TRANSFORMERS_CACHE', '/tmp/transformers_cache')
+os.environ.setdefault('TORCH_HOME', '/tmp/torch_cache')
+os.environ.setdefault('HF_HOME', '/tmp/huggingface_cache')
+
+# Fix PyTorch meta tensor issues
+try:
+    import torch
+    # Force CPU usage and disable meta device
+    torch.set_default_device('cpu')
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.backends.mps.is_available = lambda: False
+except ImportError:
+    pass
 
 # Custom CSS for better styling
 st.markdown("""
