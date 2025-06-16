@@ -11,10 +11,14 @@ faiss-cpu>=1.7.0,<2.0.0
 # Document processing
 PyPDF2>=3.0.0,<4.0.0
 
-# AI/NLP models
-transformers>=4.21.0,<5.0.0
-torch>=1.11.0,<3.0.0
+# AI/NLP models - Use stable versions to avoid meta tensor issues
+torch>=1.13.0,<2.2.0
+torchvision>=0.14.0,<0.18.0; sys_platform != "darwin"
+torchaudio>=0.13.0,<2.2.0; sys_platform != "darwin"
+transformers>=4.21.0,<4.37.0
 huggingface-hub>=0.16.0,<1.0.0
+tokenizers>=0.13.0,<0.16.0
+safetensors>=0.3.0,<0.5.0
 
 # Streamlit and web app
 streamlit>=1.25.0,<2.0.0
@@ -37,4 +41,8 @@ openai>=1.0.0,<2.0.0
 protobuf>=3.20.0,<5.0.0
 typing-extensions>=4.0.0
 charset-normalizer>=2.0.0,<4.0.0
-urllib3>=1.26.0,<3.0.0 
+urllib3>=1.26.0,<3.0.0
+
+# Memory and performance optimization
+psutil>=5.8.0,<6.0.0
+accelerate>=0.20.0,<0.26.0 
