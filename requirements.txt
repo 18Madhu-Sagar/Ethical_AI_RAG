@@ -3,7 +3,8 @@
 
 # Core web framework
 streamlit>=1.25.0,<2.0.0
-
+langchain
+chromadb
 # PDF processing
 PyPDF2>=3.0.0,<4.0.0
 
