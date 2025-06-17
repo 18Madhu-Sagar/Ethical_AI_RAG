@@ -1,52 +1,124 @@
-from typing import List, Dict, Optional, Tuple
-from langchain.schema import Document
+"""
+Enhanced RAG System with HuggingFace LLMs
+Works with Python 3.13 and includes actual LLM integration
+"""
+
+import os
+import logging
+from typing import List, Dict, Any, Optional
+from pathlib import Path
 
 from pdf_extractor import PDFExtractor
 from document_processor import DocumentProcessor
-from vector_store import VectorStore
-from response_refiner import ResponseRefiner
+from vector_store import AdvancedVectorStore
 
+logger = logging.getLogger(__name__)
 
-class EthicalAIRAG:
-    """Complete Ethical AI RAG system combining all components."""
+# HuggingFace imports
+try:
+    from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+    import torch
+    HUGGINGFACE_AVAILABLE = True
+    logger.info("✅ HuggingFace transformers available")
+except ImportError as e:
+    HUGGINGFACE_AVAILABLE = False
+    logger.warning(f"⚠️ HuggingFace not available: {e}")
+    logger.info("📝 Falling back to simple text generation")
+
+class AdvancedRAGSystem:
+    """Enhanced RAG system with HuggingFace LLM integration."""
     
-    def __init__(self, 
+    def __init__(self,
                  pdf_directory: str = ".",
-                 vector_db_path: str = "./chroma_db",
-                 use_refinement: bool = True,
-                 embedding_model: str = "all-MiniLM-L6-v2"):
-        """
-        Initialize the Ethical AI RAG system.
+                 vector_db_path: str = "./simple_vector_db",
+                 embedding_model: str = "tfidf",
+                 llm_provider: str = "auto",
+                 llm_model: str = "microsoft/DialoGPT-medium",
+                 use_streaming: bool = False):
+        """Initialize the RAG system."""
         
-        Args:
-            pdf_directory: Directory containing PDF files
-            vector_db_path: Path to store vector database
-            use_refinement: Whether to use response refinement
-            embedding_model: Name of the embedding model to use
-        """
         self.pdf_directory = pdf_directory
         self.vector_db_path = vector_db_path
-        self.use_refinement = use_refinement
+        self.embedding_model = embedding_model
+        self.llm_provider = llm_provider
+        self.llm_model = llm_model
+        self.use_streaming = use_streaming
         
         # Initialize components
         self.pdf_extractor = PDFExtractor()
         self.document_processor = DocumentProcessor()
-        self.vector_store = VectorStore(persist_directory=vector_db_path, model_name=embedding_model)
+        self.vector_store = AdvancedVectorStore(
+            persist_directory=vector_db_path,
+            model_name=embedding_model
+        )
         
-        if self.use_refinement:
-            self.response_refiner = ResponseRefiner(use_summarizer=False)  # Set to True for AI summarization
-        else:
-            self.response_refiner = None
+        # Initialize LLM
+        self.llm_pipeline = None
+        self.tokenizer = None
+        self._initialize_llm()
         
         # System state
         self.is_ready = False
         self.documents_loaded = False
         self.stats = {}
+        
+        logger.info("✅ Enhanced RAG system initialized")
+    
+    def _initialize_llm(self):
+        """Initialize the LLM with automatic fallback."""
+        # Auto-detect best available option
+        if self.llm_provider == "auto":
+            if HUGGINGFACE_AVAILABLE:
+                self.llm_provider = "huggingface"
+                logger.info("🤖 Auto-selected HuggingFace LLM")
+            else:
+                self.llm_provider = "enhanced_simple"
+                logger.info("📝 Auto-selected enhanced simple generation")
+        
+        if not HUGGINGFACE_AVAILABLE and self.llm_provider == "huggingface":
+            logger.warning("⚠️ HuggingFace not available, falling back to enhanced simple")
+            self.llm_provider = "enhanced_simple"
+        
+        try:
+            if self.llm_provider == "huggingface":
+                logger.info(f"🤖 Loading HuggingFace model: {self.llm_model}")
+                
+                # Use smaller, faster models for better performance
+                if "DialoGPT" in self.llm_model:
+                    # Conversational model
+                    self.llm_pipeline = pipeline(
+                        "text-generation",
+                        model=self.llm_model,
+                        tokenizer=self.llm_model,
+                        device=0 if torch.cuda.is_available() else -1,
+                        max_length=512,
+                        do_sample=True,
+                        temperature=0.7,
+                        pad_token_id=50256
+                    )
+                else:
+                    # General text generation
+                    self.llm_pipeline = pipeline(
+                        "text-generation",
+                        model=self.llm_model,
+                        device=0 if torch.cuda.is_available() else -1,
+                        max_length=512,
+                        do_sample=True,
+                        temperature=0.7
+                    )
+                
+                logger.info(f"✅ HuggingFace LLM loaded: {self.llm_model}")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to load HuggingFace model: {e}")
+            logger.info("📝 Falling back to enhanced simple text generation")
+            self.llm_provider = "enhanced_simple"
+            self.llm_pipeline = None
     
     def setup(self, force_rebuild: bool = False) -> bool:
-        """Set up the RAG system by processing PDFs and creating vector store."""
+        """Set up the RAG system."""
         print("\n" + "="*60)
-        print("🚀 SETTING UP ETHICAL AI RAG SYSTEM")
+        print("🚀 SETTING UP SIMPLIFIED RAG SYSTEM")
         print("="*60)
         
         try:
@@ -83,11 +155,13 @@ class EthicalAIRAG:
                 'pdf_files': len(documents_text),
                 'total_chunks': len(rag_documents),
                 'chunk_stats': self.document_processor.get_chunk_statistics(rag_documents),
-                'vector_info': self.vector_store.get_collection_info()
+                'vector_info': self.vector_store.get_collection_info(),
+                'llm_provider': self.llm_provider,
+                'llm_model': self.llm_model
             }
             
             print("\n" + "="*60)
-            print("✅ RAG SYSTEM SETUP COMPLETE")
+            print("✅ SIMPLIFIED RAG SYSTEM SETUP COMPLETE")
             print("="*60)
             self._print_setup_summary()
             
@@ -95,6 +169,7 @@ class EthicalAIRAG:
             
         except Exception as e:
             print(f"❌ Setup failed with error: {e}")
+            logger.error(f"Setup error: {e}")
             return False
     
     def _print_setup_summary(self):
@@ -104,227 +179,224 @@ class EthicalAIRAG:
         print(f"   📋 Document chunks created: {self.stats['total_chunks']}")
         print(f"   🧠 Vector store status: {self.stats['vector_info']['status']}")
         print(f"   📏 Average chunk length: {self.stats['chunk_stats']['avg_chunk_length']:.1f} characters")
-        print(f"   🔧 Response refinement: {'Enabled' if self.use_refinement else 'Disabled'}")
+        print(f"   🤖 LLM provider: {self.stats['llm_provider']}")
+        print(f"   🎯 Embedding model: {self.embedding_model}")
     
-    def ask_ethics_question(self, question: str, num_results: int = 3, refine_response: bool = True) -> List[Document]:
-        """Ask a question about AI ethics and get relevant document chunks."""
+    def ask_question(self, question: str) -> Dict[str, Any]:
+        """Ask a question and get an LLM-generated answer."""
         if not self.is_ready:
-            print("❌ RAG system not ready. Please run setup() first.")
-            return []
+            return {
+                "error": "RAG system not ready. Please process documents first.",
+                "answer": "",
+                "sources": [],
+                "confidence": 0.0
+            }
         
-        print(f"\n🔍 Searching for: '{question}'")
-        
-        # Perform similarity search
-        results = self.vector_store.similarity_search(question, k=num_results)
-        
-        if not results:
-            print("❌ No relevant documents found.")
-            return []
-        
-        print(f"✅ Found {len(results)} relevant chunks")
-        
-        # Optionally refine responses
-        if refine_response and self.response_refiner:
-            refined_results = []
-            for doc in results:
-                refined_content = self.response_refiner.quick_refine(question, doc.page_content, max_words=100)
-                refined_doc = Document(
-                    page_content=refined_content,
-                    metadata=doc.metadata
-                )
-                refined_results.append(refined_doc)
-            return refined_results
-        
-        return results
-    
-    def compare_sources(self, topic: str, num_results: int = 4) -> Dict[str, List[Document]]:
-        """Compare how different sources address a topic."""
-        if not self.is_ready:
-            print("❌ RAG system not ready. Please run setup() first.")
-            return {}
-        
-        print(f"\n📊 Comparing sources on: '{topic}'")
-        
-        # Get relevant documents
-        results = self.vector_store.similarity_search(topic, k=num_results)
-        
-        # Group by source
-        source_groups = {}
-        for doc in results:
-            source = doc.metadata.get('source', 'unknown')
-            if source not in source_groups:
-                source_groups[source] = []
-            source_groups[source].append(doc)
-        
-        print(f"✅ Found content from {len(source_groups)} sources")
-        for source, docs in source_groups.items():
-            print(f"   📄 {source}: {len(docs)} relevant chunks")
-        
-        return source_groups
-    
-    def search_keywords(self, keywords: str, num_results: int = 5) -> List[Tuple[Document, float]]:
-        """Search for specific keywords with relevance scores."""
-        if not self.is_ready:
-            print("❌ RAG system not ready. Please run setup() first.")
-            return []
-        
-        print(f"\n🔎 Keyword search: '{keywords}'")
-        
-        # Use similarity search with scores
-        results = self.vector_store.similarity_search_with_score(keywords, k=num_results)
-        
-        if not results:
-            print("❌ No relevant documents found.")
-            return []
-        
-        print(f"✅ Found {len(results)} results with relevance scores")
-        
-        return results
-    
-    def get_comprehensive_answer(self, question: str, target_length: str = "medium") -> str:
-        """Get a comprehensive answer by combining multiple sources and refining."""
-        if not self.is_ready:
-            print("❌ RAG system not ready. Please run setup() first.")
-            return ""
-        
-        print(f"\n📖 Generating comprehensive answer for: '{question}'")
-        
-        # Get multiple relevant chunks
-        results = self.vector_store.similarity_search(question, k=6)
-        
-        if not results:
-            return "No relevant information found."
-        
-        # Combine content from multiple sources
-        combined_content = ""
-        sources_used = set()
-        
-        for doc in results:
-            source = doc.metadata.get('source', 'unknown')
-            sources_used.add(source)
-            combined_content += doc.page_content + " "
-        
-        # Refine the combined response
-        if self.response_refiner:
-            refined_answer = self.response_refiner.refine_response(question, combined_content, target_length)
+        try:
+            print(f"\n🔍 Processing question: '{question}'")
             
-            print(f"✅ Generated answer using {len(sources_used)} sources: {', '.join(sources_used)}")
-            return refined_answer
+            # Get relevant documents
+            results = self.vector_store.similarity_search(question, k=5)
+            
+            if not results:
+                return {
+                    "answer": "I couldn't find any relevant information in the uploaded documents.",
+                    "sources": [],
+                    "confidence": 0.0,
+                    "num_sources": 0
+                }
+            
+            # Prepare context from retrieved documents
+            context_parts = []
+            sources = []
+            
+            for i, doc in enumerate(results[:3], 1):
+                content = doc.page_content
+                source_info = {
+                    "content": content[:200] + "..." if len(content) > 200 else content,
+                    "metadata": doc.metadata
+                }
+                sources.append(source_info)
+                context_parts.append(content[:500])  # Limit context length
+            
+            context = "\n\n".join(context_parts)
+            
+            # Generate answer using LLM
+            if self.llm_provider == "huggingface" and self.llm_pipeline:
+                answer = self._generate_llm_answer(question, context)
+                confidence = 0.9
+            elif self.llm_provider == "enhanced_simple":
+                # Enhanced simple generation with better formatting
+                answer = self._generate_enhanced_answer(question, context_parts)
+                confidence = 0.8
+            else:
+                # Basic fallback
+                answer = self._generate_simple_answer(question, context_parts)
+                confidence = 0.7
+            
+            print(f"✅ Generated answer using {len(sources)} sources with {self.llm_provider}")
+            
+            return {
+                "answer": answer,
+                "sources": sources,
+                "confidence": confidence,
+                "num_sources": len(sources),
+                "llm_model": self.llm_model
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in ask_question: {e}")
+            return {
+                "error": f"Failed to generate answer: {str(e)}",
+                "answer": "",
+                "sources": [],
+                "confidence": 0.0
+            }
+    
+    def _generate_llm_answer(self, question: str, context: str) -> str:
+        """Generate answer using HuggingFace LLM."""
+        try:
+            # Create a prompt for the LLM
+            prompt = f"""Based on the following context, please answer the question about AI ethics.
+
+Context:
+{context[:1000]}  # Limit context to avoid token limits
+
+Question: {question}
+
+Answer:"""
+            
+            # Generate response
+            response = self.llm_pipeline(
+                prompt,
+                max_length=len(prompt.split()) + 150,  # Allow for answer
+                num_return_sequences=1,
+                temperature=0.7,
+                do_sample=True,
+                pad_token_id=self.llm_pipeline.tokenizer.eos_token_id
+            )
+            
+            # Extract the generated answer
+            generated_text = response[0]['generated_text']
+            answer = generated_text[len(prompt):].strip()
+            
+            if not answer:
+                return self._generate_simple_answer(question, [context])
+            
+            return f"**AI Ethics Expert Answer:**\n\n{answer}\n\n**Based on your uploaded documents**"
+            
+        except Exception as e:
+            logger.error(f"LLM generation failed: {e}")
+            return self._generate_simple_answer(question, [context])
+    
+    def _generate_enhanced_answer(self, question: str, context_parts: List[str]) -> str:
+        """Generate enhanced answer with better analysis."""
+        # Analyze question type
+        question_lower = question.lower()
+        is_what_question = any(word in question_lower for word in ['what', 'define', 'definition'])
+        is_how_question = any(word in question_lower for word in ['how', 'method', 'approach'])
+        is_why_question = any(word in question_lower for word in ['why', 'reason', 'because'])
+        is_list_question = any(word in question_lower for word in ['list', 'types', 'kinds', 'examples'])
+        
+        # Extract key concepts from question
+        key_terms = []
+        ethics_terms = ['ethics', 'ethical', 'bias', 'fairness', 'transparency', 'accountability', 'privacy', 'ai', 'artificial intelligence']
+        for term in ethics_terms:
+            if term in question_lower:
+                key_terms.append(term)
+        
+        # Generate structured answer
+        answer = f"**AI Ethics Expert Analysis:**\n\n"
+        
+        if is_what_question:
+            answer += f"**Definition and Overview:**\n"
+        elif is_how_question:
+            answer += f"**Methods and Approaches:**\n"
+        elif is_why_question:
+            answer += f"**Reasoning and Importance:**\n"
+        elif is_list_question:
+            answer += f"**Key Points and Examples:**\n"
         else:
-            # Basic truncation if no refiner
-            words = combined_content.split()
-            max_words = {"short": 50, "medium": 100, "long": 150}[target_length]
-            if len(words) > max_words:
-                combined_content = ' '.join(words[:max_words]) + "..."
-            
-            return combined_content
+            answer += f"**Analysis:**\n"
+        
+        # Combine and analyze context
+        combined_context = " ".join(context_parts)
+        
+        # Extract relevant sentences
+        sentences = combined_context.split('.')
+        relevant_sentences = []
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) > 20:  # Filter out very short fragments
+                # Check if sentence contains key terms or question-related words
+                sentence_lower = sentence.lower()
+                relevance_score = 0
+                
+                for term in key_terms:
+                    if term in sentence_lower:
+                        relevance_score += 2
+                
+                # Boost score for question-type words
+                if is_what_question and any(word in sentence_lower for word in ['is', 'are', 'means', 'refers']):
+                    relevance_score += 1
+                elif is_how_question and any(word in sentence_lower for word in ['by', 'through', 'using', 'method']):
+                    relevance_score += 1
+                elif is_why_question and any(word in sentence_lower for word in ['because', 'since', 'due to', 'important']):
+                    relevance_score += 1
+                
+                if relevance_score > 0:
+                    relevant_sentences.append((sentence, relevance_score))
+        
+        # Sort by relevance and take top sentences
+        relevant_sentences.sort(key=lambda x: x[1], reverse=True)
+        top_sentences = [s[0] for s in relevant_sentences[:5]]
+        
+        if top_sentences:
+            answer += "\n".join([f"• {sentence.strip()}." for sentence in top_sentences])
+        else:
+            # Fallback to first parts of context
+            for i, content in enumerate(context_parts[:2], 1):
+                summary = content[:200] + "..." if len(content) > 200 else content
+                answer += f"\n• **From Source {i}:** {summary}"
+        
+        answer += f"\n\n**Key Terms Identified:** {', '.join(key_terms) if key_terms else 'AI Ethics concepts'}"
+        answer += f"\n\n**Based on {len(context_parts)} relevant document sections**"
+        
+        return answer
     
-    def get_system_status(self) -> Dict:
-        """Get current system status and statistics."""
-        status = {
+    def _generate_simple_answer(self, question: str, context_parts: List[str]) -> str:
+        """Generate simple answer by combining context."""
+        answer_parts = []
+        for i, content in enumerate(context_parts, 1):
+            if len(content) > 300:
+                summary = content[:300] + "..."
+            else:
+                summary = content
+            answer_parts.append(f"**Source {i}:** {summary}")
+        
+        answer = f"**Answer based on your documents:**\n\n"
+        answer += "\n\n".join(answer_parts)
+        return answer
+    
+    def _create_qa_chain(self):
+        """Create QA chain (simplified version)."""
+        # This is a simplified version that doesn't require complex LLM setup
+        self.is_ready = True
+        return True
+    
+    def get_system_status(self) -> Dict[str, Any]:
+        """Get current system status."""
+        return {
             'ready': self.is_ready,
             'documents_loaded': self.documents_loaded,
-            'refinement_enabled': self.use_refinement,
+            'llm_provider': self.llm_provider,
+            'llm_model': self.llm_model,
+            'embedding_model': self.embedding_model,
+            'vector_store_stats': self.vector_store.get_stats(),
             'pdf_directory': self.pdf_directory,
             'vector_db_path': self.vector_db_path
         }
-        
-        if self.is_ready:
-            status.update(self.stats)
-        
-        return status
-    
-    def interactive_query(self):
-        """Interactive query interface for the RAG system."""
-        if not self.is_ready:
-            print("❌ RAG system not ready. Please run setup() first.")
-            return
-        
-        print("\n" + "="*60)
-        print("🤖 INTERACTIVE ETHICAL AI RAG SYSTEM")
-        print("="*60)
-        print("Ask questions about AI ethics. Type 'quit' to exit.")
-        print("Available commands:")
-        print("  - 'compare [topic]' - Compare sources on a topic")
-        print("  - 'keywords [terms]' - Search for specific keywords")
-        print("  - 'comprehensive [question]' - Get detailed answer")
-        print("  - 'status' - Show system status")
-        print("-" * 60)
-        
-        while True:
-            try:
-                user_input = input("\n🔍 Your question: ").strip()
-                
-                if user_input.lower() in ['quit', 'exit', 'q']:
-                    print("👋 Goodbye!")
-                    break
-                
-                if user_input.lower() == 'status':
-                    status = self.get_system_status()
-                    print(f"\n📊 System Status:")
-                    for key, value in status.items():
-                        print(f"   {key}: {value}")
-                    continue
-                
-                if user_input.lower().startswith('compare '):
-                    topic = user_input[8:].strip()
-                    sources = self.compare_sources(topic)
-                    
-                    for source, docs in sources.items():
-                        print(f"\n📄 {source.upper()}:")
-                        for i, doc in enumerate(docs[:2]):  # Show max 2 per source
-                            preview = doc.page_content[:150] + "..." if len(doc.page_content) > 150 else doc.page_content
-                            print(f"   {i+1}. {preview}")
-                    continue
-                
-                if user_input.lower().startswith('keywords '):
-                    keywords = user_input[9:].strip()
-                    results = self.search_keywords(keywords)
-                    
-                    for i, (doc, score) in enumerate(results):
-                        source = doc.metadata.get('source', 'unknown')
-                        preview = doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content
-                        print(f"\n{i+1}. [{source}] (Score: {score:.3f})")
-                        print(f"   {preview}")
-                    continue
-                
-                if user_input.lower().startswith('comprehensive '):
-                    question = user_input[13:].strip()
-                    answer = self.get_comprehensive_answer(question, "medium")
-                    print(f"\n💡 Comprehensive Answer:\n{answer}")
-                    continue
-                
-                # Default: simple question answering
-                if user_input:
-                    results = self.ask_ethics_question(user_input, num_results=3)
-                    
-                    for i, doc in enumerate(results):
-                        source = doc.metadata.get('source', 'unknown')
-                        print(f"\n{i+1}. From {source}:")
-                        print(f"   {doc.page_content}")
-                
-            except KeyboardInterrupt:
-                print("\n👋 Goodbye!")
-                break
-            except Exception as e:
-                print(f"❌ Error: {e}")
 
-
-if __name__ == "__main__":
-    # Example usage
-    print("Initializing Ethical AI RAG System...")
-    
-    # Create RAG system
-    rag = EthicalAIRAG(
-        pdf_directory=".",  # Current directory
-        use_refinement=True
-    )
-    
-    # Setup the system
-    success = rag.setup()
-    
-    if success:
-        # Start interactive session
-        rag.interactive_query()
-    else:
-        print("Failed to set up RAG system. Please check your PDF files and try again.") 
+# Main RAG system class
+EthicalAIRAG = AdvancedRAGSystem 
