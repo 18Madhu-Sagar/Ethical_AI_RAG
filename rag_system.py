@@ -1,6 +1,6 @@
 """
-Enhanced RAG System with HuggingFace LLMs
-Works with Python 3.13 and includes actual LLM integration
+Enhanced RAG System with Simple LLM
+Works with Python 3.13 and includes simple text generation
 """
 
 import os
@@ -14,26 +14,15 @@ from vector_store import AdvancedVectorStore
 
 logger = logging.getLogger(__name__)
 
-# HuggingFace imports
-try:
-    from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-    import torch
-    HUGGINGFACE_AVAILABLE = True
-    logger.info("✅ HuggingFace transformers available")
-except ImportError as e:
-    HUGGINGFACE_AVAILABLE = False
-    logger.warning(f"⚠️ HuggingFace not available: {e}")
-    logger.info("📝 Falling back to simple text generation")
-
 class AdvancedRAGSystem:
-    """Enhanced RAG system with HuggingFace LLM integration."""
+    """Enhanced RAG system with simple text generation."""
     
     def __init__(self,
                  pdf_directory: str = ".",
                  vector_db_path: str = "./simple_vector_db",
                  embedding_model: str = "tfidf",
-                 llm_provider: str = "auto",
-                 llm_model: str = "microsoft/DialoGPT-medium",
+                 llm_provider: str = "enhanced_simple",
+                 llm_model: str = "simple",
                  use_streaming: bool = False):
         """Initialize the RAG system."""
         
@@ -65,55 +54,11 @@ class AdvancedRAGSystem:
         logger.info("✅ Enhanced RAG system initialized")
     
     def _initialize_llm(self):
-        """Initialize the LLM with automatic fallback."""
-        # Auto-detect best available option
-        if self.llm_provider == "auto":
-            if HUGGINGFACE_AVAILABLE:
-                self.llm_provider = "huggingface"
-                logger.info("🤖 Auto-selected HuggingFace LLM")
-            else:
-                self.llm_provider = "enhanced_simple"
-                logger.info("📝 Auto-selected enhanced simple generation")
-        
-        if not HUGGINGFACE_AVAILABLE and self.llm_provider == "huggingface":
-            logger.warning("⚠️ HuggingFace not available, falling back to enhanced simple")
-            self.llm_provider = "enhanced_simple"
-        
-        try:
-            if self.llm_provider == "huggingface":
-                logger.info(f"🤖 Loading HuggingFace model: {self.llm_model}")
-                
-                # Use smaller, faster models for better performance
-                if "DialoGPT" in self.llm_model:
-                    # Conversational model
-                    self.llm_pipeline = pipeline(
-                        "text-generation",
-                        model=self.llm_model,
-                        tokenizer=self.llm_model,
-                        device=0 if torch.cuda.is_available() else -1,
-                        max_length=512,
-                        do_sample=True,
-                        temperature=0.7,
-                        pad_token_id=50256
-                    )
-                else:
-                    # General text generation
-                    self.llm_pipeline = pipeline(
-                        "text-generation",
-                        model=self.llm_model,
-                        device=0 if torch.cuda.is_available() else -1,
-                        max_length=512,
-                        do_sample=True,
-                        temperature=0.7
-                    )
-                
-                logger.info(f"✅ HuggingFace LLM loaded: {self.llm_model}")
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to load HuggingFace model: {e}")
-            logger.info("📝 Falling back to enhanced simple text generation")
-            self.llm_provider = "enhanced_simple"
-            self.llm_pipeline = None
+        """Initialize the LLM with simple generation."""
+        # For deployment, always use enhanced simple generation to avoid atexit issues
+        self.llm_provider = "enhanced_simple"
+        logger.info("📝 Using enhanced simple text generation for deployment")
+        self.llm_pipeline = None
     
     def setup(self, force_rebuild: bool = False) -> bool:
         """Set up the RAG system."""
@@ -222,10 +167,7 @@ class AdvancedRAGSystem:
             context = "\n\n".join(context_parts)
             
             # Generate answer using LLM
-            if self.llm_provider == "huggingface" and self.llm_pipeline:
-                answer = self._generate_llm_answer(question, context)
-                confidence = 0.9
-            elif self.llm_provider == "enhanced_simple":
+            if self.llm_provider == "enhanced_simple":
                 # Enhanced simple generation with better formatting
                 answer = self._generate_enhanced_answer(question, context_parts)
                 confidence = 0.8
@@ -252,42 +194,6 @@ class AdvancedRAGSystem:
                 "sources": [],
                 "confidence": 0.0
             }
-    
-    def _generate_llm_answer(self, question: str, context: str) -> str:
-        """Generate answer using HuggingFace LLM."""
-        try:
-            # Create a prompt for the LLM
-            prompt = f"""Based on the following context, please answer the question about AI ethics.
-
-Context:
-{context[:1000]}  # Limit context to avoid token limits
-
-Question: {question}
-
-Answer:"""
-            
-            # Generate response
-            response = self.llm_pipeline(
-                prompt,
-                max_length=len(prompt.split()) + 150,  # Allow for answer
-                num_return_sequences=1,
-                temperature=0.7,
-                do_sample=True,
-                pad_token_id=self.llm_pipeline.tokenizer.eos_token_id
-            )
-            
-            # Extract the generated answer
-            generated_text = response[0]['generated_text']
-            answer = generated_text[len(prompt):].strip()
-            
-            if not answer:
-                return self._generate_simple_answer(question, [context])
-            
-            return f"**AI Ethics Expert Answer:**\n\n{answer}\n\n**Based on your uploaded documents**"
-            
-        except Exception as e:
-            logger.error(f"LLM generation failed: {e}")
-            return self._generate_simple_answer(question, [context])
     
     def _generate_enhanced_answer(self, question: str, context_parts: List[str]) -> str:
         """Generate enhanced answer with better analysis."""

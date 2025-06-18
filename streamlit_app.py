@@ -33,6 +33,7 @@ if 'documents_processed' not in st.session_state:
 def safe_import_rag():
     """Safely import RAG system with error handling."""
     try:
+        # Only import when actually needed
         from rag_system import AdvancedRAGSystem
         return AdvancedRAGSystem, None
     except ImportError as e:
@@ -50,7 +51,7 @@ def initialize_rag_system():
         if error:
             return None, error
         
-        # Initialize with minimal configuration
+        # Initialize with minimal configuration - NO MODEL LOADING
         rag_system = RAGSystem(
             pdf_directory=".",
             vector_db_path="./vector_db",
@@ -59,9 +60,13 @@ def initialize_rag_system():
             llm_model="simple"
         )
         
+        # Don't initialize LLM during startup
+        rag_system.llm_pipeline = None
+        rag_system.tokenizer = None
+        
         st.session_state.rag_system = rag_system
         st.session_state.system_initialized = True
-        logger.info("✅ RAG system initialized successfully")
+        logger.info("✅ RAG system initialized successfully (minimal mode)")
         return rag_system, None
         
     except Exception as e:
