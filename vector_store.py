@@ -1,203 +1,178 @@
+"""
+Simplified Vector Store for Emergency Deployment
+Uses scikit-learn TF-IDF instead of PyTorch-based embeddings
+"""
+
 import os
-import warnings
-from typing import List, Optional
-from langchain.schema import Document
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+import json
+import logging
+import numpy as np
+from typing import List, Dict, Any, Optional, Tuple
+from pathlib import Path
+import pickle
 
-# Suppress deprecation warnings for cleaner output
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+# Use scikit-learn for embeddings instead of PyTorch
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.decomposition import TruncatedSVD
 
+# Basic text preprocessing
+import re
 
-class VectorStore:
-    """Manage vector embeddings and similarity search using Chroma."""
+class SimpleVectorStore:
+    """
+    Simplified vector store using TF-IDF embeddings instead of transformer models.
+    Compatible with Python 3.13 and avoids PyTorch dependency issues.
+    """
     
-    def __init__(self, persist_directory: str = "./chroma_db", model_name: str = "all-MiniLM-L6-v2"):
-        self.persist_directory = persist_directory
-        self.model_name = model_name
-        self.embeddings = None
-        self.vectorstore = None
-        self._initialize_embeddings()
-    
-    def _initialize_embeddings(self):
-        """Initialize the embedding model."""
-        print("\n" + "="*50)
-        print("🧠 CREATING VECTOR STORE")
-        print("="*50)
-        print("Loading embeddings model (this may take a moment)...")
+    def __init__(self, persist_directory: str = "./simple_vectordb"):
+        """Initialize the simple vector store."""
+        self.persist_directory = Path(persist_directory)
+        self.persist_directory.mkdir(exist_ok=True)
         
+        # TF-IDF vectorizer for embeddings
+        self.vectorizer = TfidfVectorizer(
+            max_features=5000,
+            stop_words='english',
+            ngram_range=(1, 2),
+            min_df=1,
+            max_df=0.95
+        )
+        
+        # Optional dimensionality reduction
+        self.svd = TruncatedSVD(n_components=300, random_state=42)
+        
+        # Storage
+        self.documents = []
+        self.embeddings = None
+        self.metadata = []
+        self.is_fitted = False
+        
+        logging.info("SimpleVectorStore initialized successfully")
+    
+    def add_documents(self, documents: List[str], metadatas: List[Dict] = None) -> bool:
+        """Add documents to the vector store."""
         try:
-            self.embeddings = HuggingFaceEmbeddings(
-                model_name=self.model_name,
-                model_kwargs={'device': 'cpu'},
-                encode_kwargs={'normalize_embeddings': True}
-            )
-            print(f"✅ Embeddings model '{self.model_name}' loaded successfully")
+            if not documents:
+                return True
+            
+            # Add to storage
+            self.documents.extend(documents)
+            
+            # Handle metadata
+            if metadatas:
+                self.metadata.extend(metadatas)
+            else:
+                self.metadata.extend([{} for _ in documents])
+            
+            # Refit vectorizer with all documents
+            self._refit_vectorizer()
+            
+            logging.info(f"Added {len(documents)} documents. Total: {len(self.documents)}")
+            return True
+            
         except Exception as e:
-            print(f"❌ Failed to load embeddings model: {e}")
+            logging.error(f"Error adding documents: {e}")
+            return False
+    
+    def _refit_vectorizer(self):
+        """Refit the vectorizer with all documents."""
+        try:
+            if not self.documents:
+                return
+            
+            # Fit TF-IDF vectorizer
+            tfidf_matrix = self.vectorizer.fit_transform(self.documents)
+            
+            # Apply dimensionality reduction if we have enough features
+            if tfidf_matrix.shape[1] > 300:
+                self.embeddings = self.svd.fit_transform(tfidf_matrix.toarray())
+            else:
+                self.embeddings = tfidf_matrix.toarray()
+            
+            self.is_fitted = True
+            logging.info(f"Vectorizer fitted. Embedding shape: {self.embeddings.shape}")
+            
+        except Exception as e:
+            logging.error(f"Error fitting vectorizer: {e}")
             raise
     
-    def create_vectorstore(self, documents: List[Document], force_recreate: bool = False) -> bool:
-        """Create or load vector store from documents."""
-        if not documents:
-            print("❌ No documents provided for vectorstore creation")
-            return False
-        
-        # Check if vectorstore already exists
-        if os.path.exists(self.persist_directory) and not force_recreate:
-            print(f"📂 Loading existing vectorstore from {self.persist_directory}")
-            try:
-                self.vectorstore = Chroma(
-                    persist_directory=self.persist_directory,
-                    embedding_function=self.embeddings
-                )
-                print(f"✅ Loaded existing vectorstore with {self.vectorstore._collection.count()} documents")
-                return True
-            except Exception as e:
-                print(f"⚠️ Failed to load existing vectorstore: {e}")
-                print("Creating new vectorstore...")
-        
-        # Create new vectorstore
+    def similarity_search(self, query: str, k: int = 5) -> List[Tuple[str, float, Dict]]:
+        """Search for similar documents."""
         try:
-            print(f"🔄 Creating vectorstore from {len(documents)} documents...")
-            self.vectorstore = Chroma.from_documents(
-                documents=documents,
-                embedding=self.embeddings,
-                persist_directory=self.persist_directory
-            )
+            if not self.is_fitted or self.embeddings is None:
+                logging.warning("Vector store not fitted or no embeddings available")
+                return []
             
-            # Persist the vectorstore
-            self.vectorstore.persist()
-            print(f"✅ Vectorstore created and persisted to {self.persist_directory}")
-            print(f"📊 Total vectors: {len(documents)}")
-            return True
+            # Transform query using fitted vectorizer
+            query_tfidf = self.vectorizer.transform([query])
             
-        except Exception as e:
-            print(f"❌ Failed to create vectorstore: {e}")
-            return False
-    
-    def similarity_search(self, query: str, k: int = 4) -> List[Document]:
-        """Perform similarity search in the vector store."""
-        if not self.vectorstore:
-            print("❌ Vectorstore not initialized")
-            return []
-        
-        try:
-            results = self.vectorstore.similarity_search(query, k=k)
+            # Apply same dimensionality reduction if used
+            if hasattr(self.svd, 'components_'):
+                query_embedding = self.svd.transform(query_tfidf.toarray())
+            else:
+                query_embedding = query_tfidf.toarray()
+            
+            # Calculate similarities
+            similarities = cosine_similarity(query_embedding, self.embeddings)[0]
+            
+            # Get top k results
+            top_indices = np.argsort(similarities)[::-1][:k]
+            
+            results = []
+            for idx in top_indices:
+                if idx < len(self.documents) and similarities[idx] > 0.01:
+                    results.append((
+                        self.documents[idx],
+                        float(similarities[idx]),
+                        self.metadata[idx] if idx < len(self.metadata) else {}
+                    ))
+            
+            logging.info(f"Found {len(results)} similar documents for query")
             return results
+            
         except Exception as e:
-            print(f"❌ Similarity search failed: {e}")
+            logging.error(f"Error in similarity search: {e}")
             return []
     
-    def similarity_search_with_score(self, query: str, k: int = 4) -> List[tuple]:
-        """Perform similarity search with relevance scores."""
-        if not self.vectorstore:
-            print("❌ Vectorstore not initialized")
-            return []
-        
-        try:
-            results = self.vectorstore.similarity_search_with_score(query, k=k)
-            return results
-        except Exception as e:
-            print(f"❌ Similarity search with score failed: {e}")
-            return []
+    def get_stats(self) -> Dict[str, Any]:
+        """Get vector store statistics."""
+        return {
+            'total_documents': len(self.documents),
+            'is_fitted': self.is_fitted,
+            'embedding_dimension': self.embeddings.shape[1] if self.embeddings is not None else 0,
+            'vectorizer_features': len(self.vectorizer.vocabulary_) if self.is_fitted else 0,
+            'persist_directory': str(self.persist_directory)
+        }
     
-    def add_documents(self, documents: List[Document]) -> bool:
-        """Add new documents to existing vectorstore."""
-        if not self.vectorstore:
-            print("❌ Vectorstore not initialized")
-            return False
-        
+    def clear(self):
+        """Clear all data from the vector store."""
         try:
-            self.vectorstore.add_documents(documents)
-            self.vectorstore.persist()
-            print(f"✅ Added {len(documents)} new documents to vectorstore")
-            return True
+            self.documents = []
+            self.embeddings = None
+            self.metadata = []
+            self.is_fitted = False
+            logging.info("Vector store cleared successfully")
         except Exception as e:
-            print(f"❌ Failed to add documents: {e}")
-            return False
-    
-    def delete_collection(self) -> bool:
-        """Delete the entire vector collection."""
-        try:
-            if self.vectorstore:
-                self.vectorstore.delete_collection()
-                print("✅ Vector collection deleted")
-            
-            # Remove persist directory
-            import shutil
-            if os.path.exists(self.persist_directory):
-                shutil.rmtree(self.persist_directory)
-                print(f"✅ Persist directory {self.persist_directory} removed")
-            
-            self.vectorstore = None
-            return True
-        except Exception as e:
-            print(f"❌ Failed to delete collection: {e}")
-            return False
-    
-    def get_collection_info(self) -> dict:
-        """Get information about the vector collection."""
-        if not self.vectorstore:
-            return {"status": "not_initialized"}
-        
-        try:
-            collection = self.vectorstore._collection
-            count = collection.count()
-            
-            return {
-                "status": "ready",
-                "document_count": count,
-                "persist_directory": self.persist_directory,
-                "embedding_model": self.model_name
-            }
-        except Exception as e:
-            return {"status": "error", "error": str(e)}
+            logging.error(f"Error clearing vector store: {e}")
 
-
-if __name__ == "__main__":
-    # Example usage
-    from pdf_extractor import PDFExtractor
-    from document_processor import DocumentProcessor
+# Compatibility wrapper to match the original interface
+class VectorStore(SimpleVectorStore):
+    """Compatibility wrapper for the original VectorStore interface."""
     
-    print("Starting vector store creation...")
+    def __init__(self, persist_directory: str = "./simple_vectordb"):
+        super().__init__(persist_directory)
+        self.collection_name = "simple_collection"
     
-    # Extract and process documents
-    extractor = PDFExtractor()
-    documents_text = extractor.extract_from_directory()
+    def setup(self) -> bool:
+        """Setup method for compatibility."""
+        return True
     
-    if documents_text:
-        processor = DocumentProcessor()
-        rag_documents = processor.create_rag_documents(documents_text)
-        
-        if rag_documents:
-            # Create vector store
-            vectorstore = VectorStore()
-            success = vectorstore.create_vectorstore(rag_documents)
-            
-            if success:
-                # Test similarity search
-                print("\n" + "="*50)
-                print("🔍 TESTING SIMILARITY SEARCH")
-                print("="*50)
-                
-                test_query = "What are the ethical principles of AI?"
-                results = vectorstore.similarity_search(test_query, k=3)
-                
-                print(f"Query: {test_query}")
-                print(f"Found {len(results)} relevant chunks:")
-                
-                for i, doc in enumerate(results):
-                    source = doc.metadata.get('source', 'unknown')
-                    preview = doc.page_content[:100] + "..." if len(doc.page_content) > 100 else doc.page_content
-                    print(f"\n{i+1}. From {source}:")
-                    print(f"   {preview}")
-                
-                # Show collection info
-                info = vectorstore.get_collection_info()
-                print(f"\n📊 Collection Info:")
-                print(f"   Status: {info['status']}")
-                print(f"   Documents: {info.get('document_count', 'unknown')}")
-                print(f"   Model: {info.get('embedding_model', 'unknown')}")
-    else:
-        print("No documents to vectorize.") 
+    def create_embeddings(self, texts: List[str]) -> bool:
+        """Create embeddings for texts."""
+        return self.add_documents(texts)
+    
+    def search_similar_documents(self, query: str, k: int = 5) -> List[str]:
+        """Search for similar documents and return just the text."""
+        results = self.similarity_search(query, k)
+        return [doc for doc, score, metadata in results] 

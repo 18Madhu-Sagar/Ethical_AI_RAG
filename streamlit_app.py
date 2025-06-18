@@ -1,399 +1,307 @@
+"""
+Emergency Streamlit App for Ethical AI RAG System
+Uses simplified vector store without PyTorch dependencies
+Compatible with Python 3.13 and Streamlit Cloud deployment issues
+"""
+
 import streamlit as st
 import os
+import sys
+import logging
+from pathlib import Path
 import tempfile
-import shutil
-from typing import List, Dict
-import time
 
-# Import our RAG system components
-from rag_system import EthicalAIRAG
-from pdf_extractor import PDFExtractor
-from document_processor import DocumentProcessor
-from vector_store import VectorStore
-from response_refiner import ResponseRefiner
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Page configuration
-st.set_page_config(
-    page_title="Ethical AI RAG System",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Add current directory to Python path for local imports
+current_dir = Path(__file__).parent
+sys.path.insert(0, str(current_dir))
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .upload-section {
-        background-color: #f0f2f6;
-        padding: 2rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-    }
-    .query-section {
-        background-color: #ffffff;
-        padding: 2rem;
-        border-radius: 10px;
-        border: 1px solid #e0e0e0;
-    }
-    .result-box {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-left: 4px solid #1f77b4;
-        margin: 1rem 0;
-    }
-    .source-tag {
-        background-color: #e3f2fd;
-        color: #1976d2;
-        padding: 0.2rem 0.5rem;
-        border-radius: 15px;
-        font-size: 0.8rem;
-        margin-right: 0.5rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Emergency environment setup
+os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 
-def initialize_session_state():
-    """Initialize session state variables."""
-    if 'rag_system' not in st.session_state:
-        st.session_state.rag_system = None
-    if 'system_ready' not in st.session_state:
-        st.session_state.system_ready = False
-    if 'uploaded_files' not in st.session_state:
-        st.session_state.uploaded_files = []
-    if 'temp_dir' not in st.session_state:
-        st.session_state.temp_dir = None
-    if 'query_history' not in st.session_state:
-        st.session_state.query_history = []
+# Global variables for module loading status
+MODULES_LOADED = False
+IMPORT_ERRORS = []
 
-def save_uploaded_files(uploaded_files) -> str:
-    """Save uploaded files to a temporary directory."""
-    if st.session_state.temp_dir and os.path.exists(st.session_state.temp_dir):
-        shutil.rmtree(st.session_state.temp_dir)
+def safe_import():
+    """Safely import required modules with detailed error reporting."""
+    global MODULES_LOADED, IMPORT_ERRORS
     
-    temp_dir = tempfile.mkdtemp()
-    st.session_state.temp_dir = temp_dir
-    
-    for uploaded_file in uploaded_files:
-        with open(os.path.join(temp_dir, uploaded_file.name), "wb") as f:
-            f.write(uploaded_file.getbuffer())
-    
-    return temp_dir
-
-def setup_rag_system(pdf_directory: str, use_refinement: bool = True) -> bool:
-    """Set up the RAG system with uploaded PDFs."""
     try:
-        # Initialize RAG system
-        st.session_state.rag_system = EthicalAIRAG(
-            pdf_directory=pdf_directory,
-            vector_db_path=os.path.join(pdf_directory, "chroma_db"),
-            use_refinement=use_refinement
-        )
+        # Import basic modules first
+        import PyPDF2
+        import numpy as np
+        from sklearn.feature_extraction.text import TfidfVectorizer
         
-        # Setup the system
-        success = st.session_state.rag_system.setup(force_rebuild=True)
-        st.session_state.system_ready = success
+        # Import our simplified modules
+        from pdf_extractor import PDFExtractor
+        from document_processor import DocumentProcessor
+        from vector_store_simple import VectorStore
         
-        return success
+        MODULES_LOADED = True
+        logger.info("✅ All modules imported successfully")
+        return True
         
+    except ImportError as e:
+        error_msg = f"Import Error: {str(e)}"
+        IMPORT_ERRORS.append(error_msg)
+        logger.error(error_msg)
+        return False
     except Exception as e:
-        st.error(f"Failed to setup RAG system: {str(e)}")
+        error_msg = f"Unexpected Error: {str(e)}"
+        IMPORT_ERRORS.append(error_msg)
+        logger.error(error_msg)
         return False
 
-def display_system_stats():
-    """Display system statistics in the sidebar."""
-    if st.session_state.system_ready and st.session_state.rag_system:
-        status = st.session_state.rag_system.get_system_status()
+class EmergencyRAGSystem:
+    """Emergency RAG system using simplified components."""
+    
+    def __init__(self):
+        """Initialize the emergency RAG system."""
+        self.pdf_extractor = None
+        self.document_processor = None
+        self.vector_store = None
+        self.is_initialized = False
         
-        st.sidebar.markdown("### 📊 System Statistics")
-        st.sidebar.metric("PDF Files", status.get('pdf_files', 0))
-        st.sidebar.metric("Document Chunks", status.get('total_chunks', 0))
-        
-        if 'chunk_stats' in status:
-            chunk_stats = status['chunk_stats']
-            st.sidebar.metric("Average Chunk Length", f"{chunk_stats['avg_chunk_length']:.0f}")
-            
-            st.sidebar.markdown("### 📚 Sources")
-            for source, count in chunk_stats['chunks_per_source'].items():
-                st.sidebar.write(f"📄 **{source}**: {count} chunks")
-
-def display_query_interface():
-    """Display the main query interface."""
-    st.markdown('<div class="query-section">', unsafe_allow_html=True)
-    
-    # Query input
-    col1, col2 = st.columns([4, 1])
-    
-    with col1:
-        query = st.text_input(
-            "Ask a question about AI ethics:",
-            placeholder="e.g., What are the main ethical principles of AI?",
-            key="query_input"
-        )
-    
-    with col2:
-        query_button = st.button("🔍 Search", use_container_width=True)
-    
-    # Query type selection
-    query_type = st.selectbox(
-        "Query Type:",
-        ["Simple Question", "Comprehensive Answer", "Compare Sources", "Keyword Search"],
-        help="Choose how you want to process your query"
-    )
-    
-    # Response length for comprehensive answers
-    if query_type == "Comprehensive Answer":
-        response_length = st.selectbox(
-            "Response Length:",
-            ["short", "medium", "long"],
-            index=1
-        )
-    else:
-        response_length = "medium"
-    
-    # Process query
-    if (query_button or query) and query.strip():
-        process_query(query.strip(), query_type, response_length)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-
-def process_query(query: str, query_type: str, response_length: str = "medium"):
-    """Process the user query and display results."""
-    if not st.session_state.system_ready:
-        st.error("Please upload and process PDF files first!")
-        return
-    
-    # Add to query history
-    st.session_state.query_history.append({
-        'query': query,
-        'type': query_type,
-        'timestamp': time.strftime("%H:%M:%S")
-    })
-    
-    with st.spinner(f"Processing your {query_type.lower()}..."):
+    def initialize(self) -> bool:
+        """Initialize all components."""
         try:
-            if query_type == "Simple Question":
-                results = st.session_state.rag_system.ask_ethics_question(query, num_results=3)
-                display_simple_results(query, results)
-                
-            elif query_type == "Comprehensive Answer":
-                answer = st.session_state.rag_system.get_comprehensive_answer(query, response_length)
-                display_comprehensive_answer(query, answer)
-                
-            elif query_type == "Compare Sources":
-                sources = st.session_state.rag_system.compare_sources(query, num_results=6)
-                display_source_comparison(query, sources)
-                
-            elif query_type == "Keyword Search":
-                results = st.session_state.rag_system.search_keywords(query, num_results=5)
-                display_keyword_results(query, results)
-                
+            if not MODULES_LOADED:
+                return False
+            
+            # Import here to avoid issues if modules aren't loaded
+            from pdf_extractor import PDFExtractor
+            from document_processor import DocumentProcessor
+            from vector_store_simple import VectorStore
+            
+            self.pdf_extractor = PDFExtractor()
+            self.document_processor = DocumentProcessor()
+            self.vector_store = VectorStore()
+            
+            self.is_initialized = True
+            logger.info("✅ Emergency RAG system initialized")
+            return True
+            
         except Exception as e:
-            st.error(f"Error processing query: {str(e)}")
-
-def display_simple_results(query: str, results: List):
-    """Display simple question results."""
-    st.markdown(f"### 🔍 Results for: *{query}*")
+            logger.error(f"❌ Failed to initialize RAG system: {e}")
+            return False
     
-    if not results:
-        st.warning("No relevant documents found.")
-        return
+    def process_pdf(self, pdf_file) -> bool:
+        """Process a PDF file and add to vector store."""
+        try:
+            if not self.is_initialized:
+                return False
+            
+            # Extract text from PDF
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                tmp_file.write(pdf_file.getvalue())
+                tmp_file_path = tmp_file.name
+            
+            try:
+                text = self.pdf_extractor.extract_text(tmp_file_path)
+                if not text or len(text.strip()) < 50:
+                    st.error("❌ Could not extract meaningful text from PDF")
+                    return False
+                
+                # Process into chunks
+                chunks = self.document_processor.process_text(text)
+                if not chunks:
+                    st.error("❌ Could not process text into chunks")
+                    return False
+                
+                # Add to vector store
+                success = self.vector_store.add_documents(chunks)
+                if success:
+                    st.success(f"✅ Successfully processed PDF into {len(chunks)} chunks")
+                    return True
+                else:
+                    st.error("❌ Failed to add documents to vector store")
+                    return False
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(tmp_file_path)
+                except:
+                    pass
+            
+        except Exception as e:
+            st.error(f"❌ Error processing PDF: {str(e)}")
+            logger.error(f"PDF processing error: {e}")
+            return False
     
-    for i, doc in enumerate(results, 1):
-        source = doc.metadata.get('source', 'unknown')
-        chunk_id = doc.metadata.get('chunk_id', 'N/A')
-        
-        with st.expander(f"📄 Result {i} from {source} (Chunk {chunk_id})"):
-            st.markdown(f'<div class="result-box">{doc.page_content}</div>', unsafe_allow_html=True)
-
-def display_comprehensive_answer(query: str, answer: str):
-    """Display comprehensive answer."""
-    st.markdown(f"### 💡 Comprehensive Answer: *{query}*")
-    
-    if answer:
-        st.markdown(f'<div class="result-box">{answer}</div>', unsafe_allow_html=True)
-        
-        # Show supporting evidence
-        with st.expander("📚 View Supporting Evidence"):
-            results = st.session_state.rag_system.ask_ethics_question(query, num_results=3, refine_response=False)
-            for i, doc in enumerate(results, 1):
-                source = doc.metadata.get('source', 'unknown')
-                st.markdown(f"**Source {i}: {source}**")
-                st.text(doc.page_content[:300] + "..." if len(doc.page_content) > 300 else doc.page_content)
-                st.markdown("---")
-    else:
-        st.warning("No comprehensive answer could be generated.")
-
-def display_source_comparison(query: str, sources: Dict):
-    """Display source comparison results."""
-    st.markdown(f"### 📊 Source Comparison: *{query}*")
-    
-    if not sources:
-        st.warning("No sources found for comparison.")
-        return
-    
-    # Create tabs for each source
-    if len(sources) > 1:
-        tabs = st.tabs([f"📄 {source}" for source in sources.keys()])
-        
-        for tab, (source, docs) in zip(tabs, sources.items()):
-            with tab:
-                st.markdown(f"**{len(docs)} relevant chunks from {source}**")
-                for i, doc in enumerate(docs, 1):
-                    with st.expander(f"Excerpt {i}"):
-                        st.write(doc.page_content)
-    else:
-        # Single source
-        source, docs = next(iter(sources.items()))
-        st.markdown(f"**{len(docs)} relevant chunks from {source}**")
-        for i, doc in enumerate(docs, 1):
-            with st.expander(f"Excerpt {i}"):
-                st.write(doc.page_content)
-
-def display_keyword_results(query: str, results: List):
-    """Display keyword search results with scores."""
-    st.markdown(f"### 🔎 Keyword Search: *{query}*")
-    
-    if not results:
-        st.warning("No relevant documents found.")
-        return
-    
-    for i, (doc, score) in enumerate(results, 1):
-        source = doc.metadata.get('source', 'unknown')
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown(f"**Result {i}** from *{source}*")
-        with col2:
-            st.metric("Relevance", f"{score:.3f}")
-        
-        preview = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
-        st.markdown(f'<div class="result-box">{preview}</div>', unsafe_allow_html=True)
-        
-        with st.expander("View Full Content"):
-            st.write(doc.page_content)
-
-def display_query_history():
-    """Display query history in sidebar."""
-    if st.session_state.query_history:
-        st.sidebar.markdown("### 📝 Query History")
-        
-        for i, entry in enumerate(reversed(st.session_state.query_history[-5:]), 1):
-            with st.sidebar.expander(f"{entry['timestamp']} - {entry['type']}"):
-                st.write(f"**Query:** {entry['query']}")
+    def query(self, question: str, num_results: int = 3):
+        """Query the RAG system."""
+        try:
+            if not self.is_initialized:
+                return {"error": "System not initialized"}
+            
+            if not question.strip():
+                return {"error": "Empty question"}
+            
+            # Search for relevant documents
+            results = self.vector_store.similarity_search(question, k=num_results)
+            
+            if not results:
+                return {
+                    "answer": "I couldn't find any relevant information in the uploaded documents.",
+                    "sources": [],
+                    "confidence": 0.0
+                }
+            
+            # Simple answer generation (concatenate top results)
+            relevant_texts = [doc for doc, score, metadata in results if score > 0.1]
+            
+            if not relevant_texts:
+                return {
+                    "answer": "I found some potentially relevant information, but the similarity scores were too low to provide a confident answer.",
+                    "sources": [],
+                    "confidence": 0.0
+                }
+            
+            # Create a simple answer by combining relevant chunks
+            answer = f"Based on the uploaded documents:\n\n"
+            for i, text in enumerate(relevant_texts[:3], 1):
+                # Truncate very long texts
+                display_text = text[:500] + "..." if len(text) > 500 else text
+                answer += f"{i}. {display_text}\n\n"
+            
+            return {
+                "answer": answer,
+                "sources": relevant_texts,
+                "confidence": results[0][1] if results else 0.0,
+                "num_sources": len(relevant_texts)
+            }
+            
+        except Exception as e:
+            logger.error(f"Query error: {e}")
+            return {"error": f"Query failed: {str(e)}"}
 
 def main():
     """Main Streamlit application."""
-    initialize_session_state()
     
-    # Header
-    st.markdown('<h1 class="main-header">🤖 Ethical AI RAG System</h1>', unsafe_allow_html=True)
-    st.markdown("Upload PDF documents about AI ethics and ask questions to get intelligent, source-backed answers.")
-    
-    # Sidebar
-    st.sidebar.markdown("## 📁 Document Upload")
-    
-    # File upload
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload AI Ethics PDF Documents",
-        type=['pdf'],
-        accept_multiple_files=True,
-        help="Upload multiple PDF files containing AI ethics content"
+    # Page configuration
+    st.set_page_config(
+        page_title="Emergency Ethical AI RAG",
+        page_icon="🚨",
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
     
-    # Processing options
-    st.sidebar.markdown("### ⚙️ Processing Options")
-    use_refinement = st.sidebar.checkbox("Enable Response Refinement", value=True, 
-                                       help="Use AI to refine and improve responses")
+    # Header
+    st.title("🚨 Emergency Ethical AI RAG System")
+    st.markdown("**Simplified deployment-compatible version**")
     
-    # Process uploaded files
-    if uploaded_files:
-        if st.sidebar.button("🚀 Process Documents", use_container_width=True):
-            with st.spinner("Processing uploaded documents..."):
-                # Save files to temporary directory
-                temp_dir = save_uploaded_files(uploaded_files)
-                
-                # Setup RAG system
-                if setup_rag_system(temp_dir, use_refinement):
-                    st.success(f"✅ Successfully processed {len(uploaded_files)} documents!")
-                    st.session_state.uploaded_files = [f.name for f in uploaded_files]
-                else:
-                    st.error("❌ Failed to process documents. Please check your files and try again.")
+    # Emergency notice
+    st.warning("""
+    ⚠️ **Emergency Deployment Mode**
     
-    # Display uploaded files
-    if st.session_state.uploaded_files:
-        st.sidebar.markdown("### 📄 Uploaded Files")
-        for filename in st.session_state.uploaded_files:
-            st.sidebar.write(f"✓ {filename}")
+    This is a simplified version designed to work around deployment issues:
+    - ✅ No PyTorch dependencies (avoids meta tensor errors)
+    - ✅ Python 3.13 compatible  
+    - ✅ Uses TF-IDF embeddings instead of transformer models
+    - ✅ Simplified but functional RAG capabilities
+    """)
     
-    # Display system stats
-    display_system_stats()
+    # Check module loading status
+    if not MODULES_LOADED:
+        st.error("❌ **Module Loading Failed**")
+        st.error("Some required modules could not be imported.")
+        
+        if IMPORT_ERRORS:
+            st.error("Import Errors:")
+            for error in IMPORT_ERRORS:
+                st.code(error)
+        
+        st.info("💡 Try using requirements-emergency.txt for deployment")
+        st.stop()
     
-    # Display query history
-    display_query_history()
+    # Initialize session state
+    if 'rag_system' not in st.session_state:
+        st.session_state.rag_system = EmergencyRAGSystem()
+        st.session_state.documents_processed = 0
+        st.session_state.query_history = []
     
-    # Main content area
-    if st.session_state.system_ready:
-        # Query interface
-        display_query_interface()
-        
-        # Demo queries
-        st.markdown("### 🎯 Try These Example Queries")
-        example_queries = [
-            "What are the main ethical principles of AI?",
-            "How can we prevent algorithmic bias?",
-            "What are the privacy concerns with AI systems?",
-            "How should AI be governed and regulated?",
-            "What is the role of transparency in AI?"
-        ]
-        
-        cols = st.columns(len(example_queries))
-        for i, (col, query) in enumerate(zip(cols, example_queries)):
-            with col:
-                if st.button(f"💡 Example {i+1}", key=f"example_{i}", use_container_width=True):
-                    st.session_state.query_input = query
-                    st.experimental_rerun()
+    # Initialize RAG system
+    if not st.session_state.rag_system.is_initialized:
+        with st.spinner("Initializing Emergency RAG System..."):
+            success = st.session_state.rag_system.initialize()
+            if not success:
+                st.error("❌ Failed to initialize RAG system")
+                st.stop()
     
-    else:
-        # Welcome message
-        st.markdown("""
-        ### 👋 Welcome to the Ethical AI RAG System!
+    # Sidebar
+    with st.sidebar:
+        st.header("📊 System Status")
         
-        This system helps you explore and understand AI ethics by allowing you to:
+        # System stats
+        if st.session_state.rag_system.vector_store:
+            stats = st.session_state.rag_system.vector_store.get_stats()
+            st.metric("Documents Processed", stats.get('total_documents', 0))
+            st.metric("Vector Dimensions", stats.get('embedding_dimension', 0))
         
-        - 📄 **Upload multiple PDF documents** about AI ethics
-        - 🔍 **Ask natural language questions** about the content
-        - 💡 **Get comprehensive answers** backed by source citations
-        - 📊 **Compare perspectives** from different sources
-        - 🔎 **Search for specific keywords** with relevance scoring
-        
-        **To get started:**
-        1. Upload one or more PDF files using the sidebar
-        2. Click "Process Documents" to analyze the content
-        3. Start asking questions about AI ethics!
-        
-        **Supported document types:** Academic papers, policy documents, ethics guidelines, research reports, and more.
-        """)
-        
-        # Sample upload area
-        st.markdown('<div class="upload-section">', unsafe_allow_html=True)
-        st.markdown("### 🚀 Ready to Start?")
-        st.markdown("Upload your AI ethics documents using the **Document Upload** section in the sidebar.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.header("🔧 Emergency Controls")
+        if st.button("Clear All Data"):
+            if st.session_state.rag_system.vector_store:
+                st.session_state.rag_system.vector_store.clear()
+                st.session_state.documents_processed = 0
+                st.success("✅ Data cleared")
+                st.rerun()
     
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style='text-align: center; color: #666; font-size: 0.8rem;'>
-        Powered by LangChain, Chroma, and Streamlit | 
-        <a href='https://github.com' target='_blank'>View Source Code</a>
-    </div>
-    """, unsafe_allow_html=True)
+    # Main content
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.header("📄 Document Upload")
+        
+        uploaded_files = st.file_uploader(
+            "Upload PDF documents",
+            type=['pdf'],
+            accept_multiple_files=True,
+            help="Upload PDF files to build your knowledge base"
+        )
+        
+        if uploaded_files:
+            for uploaded_file in uploaded_files:
+                if st.button(f"Process {uploaded_file.name}", key=f"process_{uploaded_file.name}"):
+                    with st.spinner(f"Processing {uploaded_file.name}..."):
+                        success = st.session_state.rag_system.process_pdf(uploaded_file)
+                        if success:
+                            st.session_state.documents_processed += 1
+                            st.rerun()
+    
+    with col2:
+        st.header("❓ Ask Questions")
+        
+        if st.session_state.documents_processed == 0:
+            st.info("📝 Please upload and process some PDF documents first")
+        else:
+            question = st.text_area(
+                "Enter your question:",
+                height=100,
+                placeholder="What would you like to know about the uploaded documents?"
+            )
+            
+            if st.button("🔍 Search", type="primary") and question:
+                with st.spinner("Searching documents..."):
+                    result = st.session_state.rag_system.query(question, 3)
+                    
+                    if "error" in result:
+                        st.error(f"❌ {result['error']}")
+                    else:
+                        # Display answer
+                        st.subheader("📋 Answer")
+                        st.write(result["answer"])
+                        
+                        # Display metadata
+                        st.write(f"**Confidence:** {result.get('confidence', 0):.2f}")
+                        st.write(f"**Sources Used:** {result.get('num_sources', 0)}")
+
+# Initialize modules on import
+safe_import()
 
 if __name__ == "__main__":
     main() 
