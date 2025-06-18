@@ -1,4 +1,5 @@
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 # 🚀 Enhanced Ethical AI RAG System - Deployment Package
 
 ## ✅ **FIXED**: LangChain Dependencies Included
@@ -65,6 +66,8 @@ pip install langchain langchain-community
 
 ---
 =======
+=======
+>>>>>>> Stashed changes
 # 🚀 Enhanced Ethical AI RAG System - Deployment Package
 
 ## ✅ **FIXED**: LangChain Dependencies Included
@@ -130,5 +133,8 @@ pip install langchain langchain-community
 - **DEPLOYMENT_GUIDE.md**: Detailed setup instructions
 
 ---
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 **Status**: ✅ **LangChain Dependencies Fixed** | **Version**: Enhanced RAG with LangChain Support 

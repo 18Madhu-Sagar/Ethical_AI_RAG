@@ -1,4 +1,5 @@
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 """
 Enhanced RAG System with Simple LLM
 Works with Python 3.13 and includes simple text generation
@@ -307,6 +308,8 @@ class AdvancedRAGSystem:
 
 # Main RAG system class
 =======
+=======
+>>>>>>> Stashed changes
 """
 Enhanced RAG System with HuggingFace LLMs
 Works with Python 3.13 and includes actual LLM integration
@@ -706,5 +709,8 @@ Answer:"""
         }
 
 # Main RAG system class
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 EthicalAIRAG = AdvancedRAGSystem 

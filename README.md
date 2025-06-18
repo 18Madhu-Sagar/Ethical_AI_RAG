@@ -1,4 +1,5 @@
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 # 🤖 Simplified Ethical AI RAG System
 
 A **reliable and working** RAG (Retrieval-Augmented Generation) system for ethical AI document analysis. This system is designed to work seamlessly with **Python 3.13** and uses proven, stable technologies.
@@ -221,6 +222,8 @@ For issues or questions:
 ---
 
 =======
+=======
+>>>>>>> Stashed changes
 # 🤖 Simplified Ethical AI RAG System
 
 A **reliable and working** RAG (Retrieval-Augmented Generation) system for ethical AI document analysis. This system is designed to work seamlessly with **Python 3.13** and uses proven, stable technologies.
@@ -442,5 +445,8 @@ For issues or questions:
 
 ---
 
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 **Built with reliability in mind** - This system prioritizes working functionality over cutting-edge features. 

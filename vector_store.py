@@ -534,5 +534,8 @@ class AdvancedVectorStore:
             logger.error(f"❌ Error persisting vector store: {e}")
 
 # Main VectorStore class
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 VectorStore = AdvancedVectorStore 
