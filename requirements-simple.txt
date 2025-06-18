@@ -1,8 +1,0 @@
-langchain
-langchain-community
-chromadb
-sentence-transformers
-PyPDF2
-streamlit
-pandas
-numpy 
