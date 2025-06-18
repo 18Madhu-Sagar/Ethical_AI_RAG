@@ -1,5 +1,4 @@
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
+
 """
 Enhanced RAG System with Simple LLM
 Works with Python 3.13 and includes simple text generation
