@@ -22,22 +22,22 @@ sys.path.insert(0, str(current_dir))
 # Environment setup
 os.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 
-# Global variables
-SYSTEM_INITIALIZED = False
-RAG_SYSTEM = None
+# Global variables - use session state instead of global variables
+if 'rag_system' not in st.session_state:
+    st.session_state.rag_system = None
+if 'system_initialized' not in st.session_state:
+    st.session_state.system_initialized = False
 
 def initialize_rag_system():
-    """Initialize the advanced RAG system."""
-    global SYSTEM_INITIALIZED, RAG_SYSTEM
-    
-    if SYSTEM_INITIALIZED and RAG_SYSTEM:
-        return RAG_SYSTEM
+    """Initialize the advanced RAG system with lazy loading."""
+    if st.session_state.system_initialized and st.session_state.rag_system:
+        return st.session_state.rag_system
     
     try:
         from rag_system import AdvancedRAGSystem
         
         # Initialize with auto-detection (HuggingFace if available, enhanced simple otherwise)
-        RAG_SYSTEM = AdvancedRAGSystem(
+        rag_system = AdvancedRAGSystem(
             pdf_directory=".",
             vector_db_path="./simple_vector_db",
             embedding_model="tfidf",
@@ -45,9 +45,10 @@ def initialize_rag_system():
             llm_model="microsoft/DialoGPT-medium"
         )
         
-        SYSTEM_INITIALIZED = True
+        st.session_state.rag_system = rag_system
+        st.session_state.system_initialized = True
         logger.info("✅ Enhanced RAG system with auto-detected LLM initialized")
-        return RAG_SYSTEM
+        return rag_system
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize RAG system: {e}")
@@ -150,13 +151,17 @@ def main():
     - ✅ Works with Python 3.13
     """)
     
-    # Initialize system
-    rag_system = initialize_rag_system()
+    # Initialize system only when needed
+    rag_system = None
     
     # Sidebar
     with st.sidebar:
         st.header("📊 System Status")
         
+        # Only initialize when sidebar is accessed
+        if st.button("🔄 Initialize System") or st.session_state.system_initialized:
+            rag_system = initialize_rag_system()
+            
         if rag_system:
             status = rag_system.get_system_status()
             st.metric("System Ready", "✅ Yes" if status['ready'] else "❌ No")
@@ -169,7 +174,7 @@ def main():
             st.metric("Vector Documents", vector_stats['num_documents'])
             st.metric("Embedding Dimension", vector_stats['embedding_dimension'])
         else:
-            st.error("❌ System not initialized")
+            st.warning("⚠️ System not initialized. Click 'Initialize System' to start.")
         
         st.header("🔧 Controls")
         if st.button("🗑️ Clear Vector Store"):
